@@ -32,15 +32,14 @@ def compute_loss(network, dataset, loss_function, device, N=2000, batch_size=50)
         batch_size = min(batch_size, N)
         dataset_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
         loss_fn = loss_function_dict[loss_function](reduction='sum')
-        one_hots = torch.eye(10, 10).to(device)
         total = 0
         points = 0
         for x, labels in islice(dataset_loader, N // batch_size):
-            y = network(x.to(device))
-            if loss_function == 'CrossEntropy':
-                total += loss_fn(y, labels.to(device)).item()
-            elif loss_function == 'MSE':
-                total += loss_fn(y, one_hots[labels]).item()
+            x_hat = network(x.to(device)) # reconstruction
+            if loss_function == 'MSE':
+                total += loss_fn(x_hat, x).item()
+            else:
+                pass # more losses
             points += len(labels)
         return total / points
 
@@ -60,7 +59,6 @@ activation_dict = {
 
 loss_function_dict = {
     'MSE': nn.MSELoss,
-    'CrossEntropy': nn.CrossEntropyLoss
 }
 
 
@@ -119,7 +117,6 @@ def main(args):
     grads = None
 
     steps = 0
-    one_hots = torch.eye(10, 10).to(device)
     with tqdm(total=args.optimization_steps, dynamic_ncols=True) as pbar:
         for x, labels in islice(cycle(train_loader), args.optimization_steps):
             do_log = (steps < 30) or (steps < 150 and steps % 10 == 0) or steps % log_freq == 0
@@ -135,11 +132,11 @@ def main(args):
                     )
                 )
 
-            y = ae(x.to(device))
-            if args.loss_function == 'CrossEntropy':
-                loss = loss_fn(y, labels.to(device))
-            elif args.loss_function == 'MSE':
-                loss = loss_fn(y, one_hots[labels])
+            x_hat = ae(x.to(device))
+            if args.loss_function == 'MSE':
+                loss = loss_fn(x_hat, x)
+            else:
+                pass # more losses
 
             optimizer.zero_grad()
             loss.backward()
