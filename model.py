@@ -116,6 +116,10 @@ class Autoencoder(nn.Module):
         z = self.encoder(x) # latent representation
         x_hat = self.decoder(z) # output (reconstructed input)
         return x_hat, z # output, latent
+    
+# alternative: 
+# make a simpler autoencoder like in: https://www.tensorflow.org/tutorials/generative/autoencoder?hl=es-419
+# and add noise to the input
 
 if __name__ == "__main__":
     # Define a hook to capture and print the shape of tensors
