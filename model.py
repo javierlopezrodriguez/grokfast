@@ -103,7 +103,15 @@ class Autoencoder(nn.Module):
 
     def forward(self, x):
         """
-        The forward function takes in an image and returns the reconstructed image and the latent representation
+        The forward function takes in an image and returns the reconstructed image
+        """
+        z = self.encoder(x) # latent representation
+        x_hat = self.decoder(z) # output (reconstructed input)
+        return x_hat # output
+    
+    def forward_with_latent(self, x):
+        """
+        The forward function takes in an image and returns the reconstructed image
         """
         z = self.encoder(x) # latent representation
         x_hat = self.decoder(z) # output (reconstructed input)
@@ -122,7 +130,7 @@ if __name__ == "__main__":
         layer.register_forward_hook(hook_fn)
 
     print("Model forward")
-    reconstructed, latent = conv_ae(conv_ae.example_input)
+    reconstructed, latent = conv_ae.forward_with_latent(conv_ae.example_input)
     print("---")
     print("Input", conv_ae.example_input.shape)
     print("Reconstruction", reconstructed.shape) 
