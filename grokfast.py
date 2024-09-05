@@ -32,7 +32,7 @@ def gradfilter_ma(
 
     return grads
 
-
+# this is the gradient filter we should use
 def gradfilter_ema(
     m: nn.Module,
     grads: Optional[Dict[str, torch.Tensor]] = None,
