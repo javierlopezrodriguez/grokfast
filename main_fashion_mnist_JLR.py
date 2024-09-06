@@ -12,11 +12,14 @@ from tqdm.auto import tqdm
 
 import torch
 import torch.nn as nn
+from torch.utils.data import Subset, DataLoader
 import torchvision
 from torchvision import transforms as T
 
 from grokfast import *
 from model import Autoencoder, Encoder, Decoder
+
+from sklearn.manifold import TSNE
 
 
 def cycle(iterable):
@@ -30,7 +33,7 @@ def compute_loss(network, dataset, loss_function, device, N=2000, batch_size=50)
     with torch.no_grad():
         N = min(len(dataset), N)
         batch_size = min(batch_size, N)
-        dataset_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
+        dataset_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
         loss_fn = loss_function_dict[loss_function](reduction='sum')
         total = 0
         points = 0
@@ -80,15 +83,16 @@ def main(args):
         transform=T.ToTensor(), download=True) # ToTensor scales to [0,1]
     test = torchvision.datasets.FashionMNIST(root=args.download_directory, train=False, 
         transform=T.ToTensor(), download=True) 
-    train = torch.utils.data.Subset(train, range(args.train_points))
-    train_loader = torch.utils.data.DataLoader(train, batch_size=args.batch_size, shuffle=True)
+    train = Subset(train, range(args.train_points))
+    train_loader = DataLoader(train, batch_size=args.batch_size, shuffle=True)
 
     assert args.activation in activation_dict, f"Unsupported activation function: {args.activation}"
     activation_fn = activation_dict[args.activation]
 
     # create model
     ae = Autoencoder(base_channel_size=32,
-                     latent_dim=64,
+                     #latent_dim=64,
+                     latent_dim=16,
                      encoder_class=Encoder,
                      encoder_act_fn=activation_fn,
                      decoder_class=Decoder,
@@ -184,6 +188,97 @@ def main(args):
                     'val_loss': test_losses,
                 }, f"results/fashion_mnist_{args.label}.pt")
 
+    # Save final model
+    torch.save(ae.state_dict(), f"results/fashion_mnist_{args.label}_model_weights.pt")
+
+    # TSNE
+    # load dataset (again because we did subset the train earlier)
+    train = torchvision.datasets.FashionMNIST(root=args.download_directory, train=True, 
+        transform=T.ToTensor(), download=True) # ToTensor scales to [0,1]
+    test = torchvision.datasets.FashionMNIST(root=args.download_directory, train=False, 
+        transform=T.ToTensor(), download=True) 
+    train_loader = DataLoader(train, batch_size=args.batch_size, shuffle=False)
+    test_loader = DataLoader(test, batch_size=args.batch_size, shuffle=False)
+
+    # Function to extract latent vectors and labels
+    def get_latent_vectors(ae, data_loader, device):
+        latent_vectors = []
+        labels = []
+        ae.eval()  # Set the model to evaluation mode
+        with torch.no_grad():
+            for x, y in data_loader:
+                x = x.to(device)
+                _, z = ae.forward_with_latent(x)
+                latent_vectors.append(z.cpu().numpy())
+                labels.append(y.numpy())
+        latent_vectors = np.concatenate(latent_vectors, axis=0)
+        labels = np.concatenate(labels, axis=0)
+        return latent_vectors, labels
+    
+    # Extract latent vectors and labels for train and test sets
+    train_latent, train_labels = get_latent_vectors(ae, train_loader, device)
+    test_latent, test_labels = get_latent_vectors(ae, test_loader, device)
+
+    # Combine train and test latent vectors
+    combined_latent = np.concatenate([train_latent, test_latent], axis=0)
+    combined_labels = np.concatenate([train_labels, test_labels], axis=0)
+    combined_split = np.concatenate([np.zeros_like(train_labels), np.ones_like(test_labels)])  # 0 for train, 1 for test
+
+    # Apply t-SNE for dimensionality reduction
+    tsne = TSNE(n_components=2, random_state=args.seed, verbose=3, n_jobs=-1) # default perplexity etc.
+
+    # Reduce dimensionality separately for train, test, and combined
+    #train_latent_2d = tsne.fit_transform(train_latent)
+    #test_latent_2d = tsne.fit_transform(test_latent)
+    combined_latent_2d = tsne.fit_transform(combined_latent)
+
+    # Plotting function for t-SNE
+    def plot_tsne(latent_2d, labels, title, save_path=None):
+        plt.figure(figsize=(8, 8))
+        scatter = plt.scatter(latent_2d[:, 0], latent_2d[:, 1], c=labels, cmap='tab10', s=10)
+        plt.colorbar(scatter, label="Class")
+        plt.title(title)
+        plt.xlabel("t-SNE Component 1")
+        plt.ylabel("t-SNE Component 2")
+        # Save figure if save_path is provided
+        if save_path:
+            plt.savefig(save_path, dpi=150)
+        plt.show()
+
+    # Plotting function for t-SNE with dataset and class labels
+    def plot_combined_tsne(latent_2d, split_labels, class_labels, title, save_path=None):
+        plt.figure(figsize=(8, 8))
+        # Define markers and color map for visualization
+        markers = ['o', 'x']  # 'o' for train, 'x' for test
+
+        # Plot train and test points with different markers and colors for class labels
+        for i, dataset_label in enumerate(np.unique(split_labels)):  # 0 for train, 1 for test
+            indices = split_labels == dataset_label
+            plt.scatter(latent_2d[indices, 0], latent_2d[indices, 1],
+                        c=class_labels[indices], cmap='tab10', label=f"{'Train' if dataset_label == 0 else 'Test'}",
+                        marker=markers[dataset_label], s=10, alpha=0.7)
+
+        plt.colorbar(label="Class Label")
+        plt.title(title)
+        plt.xlabel("t-SNE Component 1")
+        plt.ylabel("t-SNE Component 2")
+        plt.legend(title="Dataset", loc="best")
+
+        # Save figure if save_path is provided
+        if save_path:
+            plt.savefig(save_path, dpi=150)
+        plt.show()
+
+    # Plot t-SNE
+    train_title = "t-SNE of Train Latent Vectors with Class Labels"
+    train_save_path = f"results/fashion_mnist_{args.label}_tsne_train.png"
+    test_title = "t-SNE of Test Latent Vectors with Class Labels"
+    test_save_path = f"results/fashion_mnist_{args.label}_tsne_test.png"
+    plot_tsne(combined_latent_2d[:train_latent.shape[0]], train_labels, train_title, train_save_path)
+    plot_tsne(combined_latent_2d[train_latent.shape[0]:], test_labels, test_title, test_save_path)
+    combined_title = "t-SNE of Train and Test Latent Vectors with Class Labels"
+    combined_save_path = f"results/fashion_mnist_{args.label}_tsne_combined.png"
+    plot_combined_tsne(combined_latent_2d, combined_split, combined_labels, combined_title, combined_save_path)
 
 if __name__ == '__main__':
     parser = ArgumentParser()
