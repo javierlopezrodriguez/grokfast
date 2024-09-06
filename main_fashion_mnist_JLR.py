@@ -126,7 +126,7 @@ def main(args):
                 log_steps.append(steps)
 
                 pbar.set_description(
-                    "L: {0:1.1e}|{1:1.1e}. A: {2:2.1f}%|{3:2.1f}%".format(
+                    "L: {0:1.1e}|{1:1.1e}".format(
                         train_losses[-1],
                         test_losses[-1],
                     )
