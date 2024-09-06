@@ -37,7 +37,7 @@ def compute_loss(network, dataset, loss_function, device, N=2000, batch_size=50)
         for x, labels in islice(dataset_loader, N // batch_size):
             x_hat = network(x.to(device)) # reconstruction
             if loss_function == 'MSE':
-                total += loss_fn(x_hat.to(device), x).item()
+                total += loss_fn(x_hat.to(device), x.to(device)).item()
             else:
                 pass # more losses
             points += len(labels)
