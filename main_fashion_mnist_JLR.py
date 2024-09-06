@@ -35,9 +35,10 @@ def compute_loss(network, dataset, loss_function, device, N=2000, batch_size=50)
         total = 0
         points = 0
         for x, labels in islice(dataset_loader, N // batch_size):
-            x_hat = network(x.to(device)) # reconstruction
+            x = x.to(device)
+            x_hat = network(x) # reconstruction
             if loss_function == 'MSE':
-                total += loss_fn(x_hat.to(device), x.to(device)).item()
+                total += loss_fn(x_hat, x).item()
             else:
                 pass # more losses
             points += len(labels)
@@ -119,6 +120,7 @@ def main(args):
     steps = 0
     with tqdm(total=args.optimization_steps, dynamic_ncols=True) as pbar:
         for x, labels in islice(cycle(train_loader), args.optimization_steps):
+            x = x.to(device)
             do_log = (steps < 30) or (steps < 150 and steps % 10 == 0) or steps % log_freq == 0
             if do_log:
                 train_losses.append(compute_loss(ae, train, args.loss_function, device, N=len(train)))
@@ -132,7 +134,7 @@ def main(args):
                     )
                 )
 
-            x_hat = ae(x.to(device))
+            x_hat = ae(x)
             if args.loss_function == 'MSE':
                 loss = loss_fn(x_hat, x)
             else:
