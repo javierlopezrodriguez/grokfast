@@ -133,10 +133,25 @@ if __name__ == "__main__":
     for layer in conv_ae.encoder.net + conv_ae.decoder.linear + conv_ae.decoder.net:
         layer.register_forward_hook(hook_fn)
 
-    print("Model forward")
-    reconstructed, latent = conv_ae.forward_with_latent(conv_ae.example_input)
+
+    loss_fn = nn.MSELoss(reduction="sum")
+    from torch.optim import AdamW
+    opt = AdamW(conv_ae.parameters())
     print("---")
+    print("Model forward")
+    print("---")
+    reconstructed, latent = conv_ae.forward_with_latent(conv_ae.example_input)
     print("Input", conv_ae.example_input.shape)
     print("Reconstruction", reconstructed.shape) 
     print("Latent", latent.shape)
+    opt.zero_grad()
+    loss = loss_fn(reconstructed, conv_ae.example_input)
+    loss.backward()
+    print("---")
+    print("Parameters")
+    print("---")
+    grads = {n: p.grad.data.detach() for n, p in conv_ae.named_parameters() if p.requires_grad and p.grad is not None}
+    for k, v in grads.items():
+        print(k, ":", v.shape, f"(Total: {v.numel()})")
+    print("Total number of parameters:", sum([v.numel() for v in grads.values()]))
     
