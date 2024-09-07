@@ -18,7 +18,8 @@ from torchvision import transforms as T
 
 from grokfast import *
 #from model import Autoencoder, Encoder, Decoder
-from model import DenoiseAutoencoder
+#from model import DenoiseAutoencoder
+from model import DenoiseAutoencoderOvercomplete
 
 from sklearn.manifold import TSNE
 
@@ -244,7 +245,8 @@ def main(args):
                      width=28,
                      height=28)
     """
-    ae = DenoiseAutoencoder(activation_fn, nn.Sigmoid)
+    #ae = DenoiseAutoencoder(activation_fn, nn.Sigmoid)
+    ae = DenoiseAutoencoderOvercomplete(activation_fn, nn.Sigmoid)
     ae.to(device)
     with torch.no_grad():
         for p in ae.parameters():

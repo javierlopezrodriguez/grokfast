@@ -161,6 +161,7 @@ class DenoiseAutoencoder(nn.Module):
         return x_hat, z.reshape(x.shape[0], -1) # output, latent (flattened)
 
 # Autoencoder that increases in capacity instead of decreasing (overcomplete)
+# https://stats.stackexchange.com/questions/386716/when-does-my-autoencoder-start-to-overfit
 class DenoiseAutoencoderOvercomplete(nn.Module):
     def __init__(self, activation_fn: object = nn.ReLU, final_activation_fn: object = nn.Sigmoid):
         super().__init__()
