@@ -160,9 +160,44 @@ class DenoiseAutoencoder(nn.Module):
         x_hat = self.decoder(z) # output (reconstructed input)
         return x_hat, z.reshape(x.shape[0], -1) # output, latent (flattened)
 
-# alternative: 
-# make a simpler autoencoder like in: https://www.tensorflow.org/tutorials/generative/autoencoder?hl=es-419
-# and add noise to the input
+# Autoencoder that increases in capacity instead of decreasing (overcomplete)
+class DenoiseAutoencoderOvercomplete(nn.Module):
+    def __init__(self, activation_fn: object = nn.ReLU, final_activation_fn: object = nn.Sigmoid):
+        super().__init__()
+        self.encoder = nn.Sequential(
+            nn.Conv2d(1, 32, kernel_size=(3, 3), padding=1, stride=2), # (1,28,28) -> (32,14,14)
+            activation_fn(),
+            nn.Conv2d(32, 64, kernel_size=(3, 3), padding=1, stride=2), # (32,14,14) -> (64,7,7)
+            activation_fn(),
+        )
+
+        self.decoder = nn.Sequential(
+            nn.ConvTranspose2d(64, 32, kernel_size=(3, 3), stride=2, padding=1, output_padding=1), # (64,7,7) -> (32,14,14)
+            activation_fn(),
+            nn.ConvTranspose2d(32, 16, kernel_size=(3, 3), stride=2, padding=1, output_padding=1), # (32,14,14) -> (16,28,28)
+            activation_fn(),
+            nn.Conv2d(16, 1, kernel_size=(3, 3), stride=1, padding='same'), # (16,28,28) -> (1,28,28)
+            final_activation_fn(),
+        )
+
+        # Example input array needed for visualizing the graph of the network
+        self.example_input = torch.zeros(2, 1, 28, 28)
+
+    def forward(self, x):
+        """
+        The forward function takes in an image and returns the reconstructed image
+        """
+        z = self.encoder(x) # latent representation
+        x_hat = self.decoder(z) # output (reconstructed input)
+        return x_hat # output
+    
+    def forward_with_latent(self, x):
+        """
+        The forward function takes in an image and returns the reconstructed image
+        """
+        z = self.encoder(x) # latent representation
+        x_hat = self.decoder(z) # output (reconstructed input)
+        return x_hat, z.reshape(x.shape[0], -1) # output, latent (flattened)
 
 if __name__ == "__main__":
     # Define a hook to capture and print the shape of tensors
@@ -178,7 +213,7 @@ if __name__ == "__main__":
         layer.register_forward_hook(hook_fn)
     """
 
-    conv_ae = DenoiseAutoencoder()
+    conv_ae = DenoiseAutoencoderOvercomplete()
     for layer in conv_ae.encoder + conv_ae.decoder:
         layer.register_forward_hook(hook_fn)
 
