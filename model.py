@@ -117,6 +117,49 @@ class Autoencoder(nn.Module):
         x_hat = self.decoder(z) # output (reconstructed input)
         return x_hat, z # output, latent
     
+# the previous one with the training configuration does not produce anything useful
+
+# based on: https://www.tensorflow.org/tutorials/generative/autoencoder?hl=es-419
+class DenoiseAutoencoder(nn.Module):
+    def __init__(self, activation_fn: object = nn.ReLU, final_activation_fn: object = nn.Sigmoid):
+        super().__init__()
+        self.encoder = nn.Sequential(
+            nn.Conv2d(1, 16, kernel_size=(3, 3), padding=1, stride=2), # (1,28,28) -> (16,14,14)
+            activation_fn(),
+            nn.Conv2d(16, 8, kernel_size=(3, 3), padding=1, stride=2), # (16,14,14) -> (8,7,7)
+            activation_fn(),
+            nn.Conv2d(8, 1, kernel_size=(3, 3), padding="same", stride=1), # (8,7,7) -> (1,7,7) # latent 1x7x7 = 49
+            activation_fn(),
+        )
+
+        self.decoder = nn.Sequential(
+            nn.ConvTranspose2d(1, 8, kernel_size=(3, 3), stride=2, padding=1, output_padding=1), # (1,7,7) -> (8,14,14)
+            activation_fn(),
+            nn.ConvTranspose2d(8, 16, kernel_size=(3, 3), stride=2, padding=1, output_padding=1), # (8,14,14) -> (16,28,28)
+            activation_fn(),
+            nn.Conv2d(16, 1, kernel_size=(3, 3), stride=1, padding='same'), # (16,28,28) -> (1,28,28)
+            final_activation_fn(),
+        )
+
+        # Example input array needed for visualizing the graph of the network
+        self.example_input = torch.zeros(2, 1, 28, 28)
+
+    def forward(self, x):
+        """
+        The forward function takes in an image and returns the reconstructed image
+        """
+        z = self.encoder(x) # latent representation
+        x_hat = self.decoder(z) # output (reconstructed input)
+        return x_hat # output
+    
+    def forward_with_latent(self, x):
+        """
+        The forward function takes in an image and returns the reconstructed image
+        """
+        z = self.encoder(x) # latent representation
+        x_hat = self.decoder(z) # output (reconstructed input)
+        return x_hat, z.reshape(x.shape[0], -1) # output, latent (flattened)
+
 # alternative: 
 # make a simpler autoencoder like in: https://www.tensorflow.org/tutorials/generative/autoencoder?hl=es-419
 # and add noise to the input
@@ -126,13 +169,18 @@ if __name__ == "__main__":
     def hook_fn(module, input, output):
         print(f"{module.__class__.__name__}: Input Shape: {input[0].shape} -> Output Shape: {output.shape}")
 
+    """
     # 28 * 28 = 784 - latent dim of 64 is a good compression maybe?
     conv_ae = Autoencoder(base_channel_size=32, latent_dim=64)
 
     # Register hooks to each layer in the encoder and decoder
     for layer in conv_ae.encoder.net + conv_ae.decoder.linear + conv_ae.decoder.net:
         layer.register_forward_hook(hook_fn)
+    """
 
+    conv_ae = DenoiseAutoencoder()
+    for layer in conv_ae.encoder + conv_ae.decoder:
+        layer.register_forward_hook(hook_fn)
 
     loss_fn = nn.MSELoss(reduction="sum")
     from torch.optim import AdamW
