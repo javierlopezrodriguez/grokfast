@@ -17,7 +17,8 @@ import torchvision
 from torchvision import transforms as T
 
 from grokfast import *
-from model import Autoencoder, Encoder, Decoder
+#from model import Autoencoder, Encoder, Decoder
+from model import DenoiseAutoencoder
 
 from sklearn.manifold import TSNE
 
@@ -65,6 +66,119 @@ loss_function_dict = {
     'MSE': nn.MSELoss,
 }
 
+def plot_losses(log_steps, train_losses, test_losses, loss_function, save_path=None):
+    """
+    Plots the train and test loss curves and saves the plot as a PNG file.
+
+    Parameters:
+    - log_steps: List or array of log steps (x-axis values)
+    - train_losses: List or array of training losses (y-axis values for train curve)
+    - test_losses: List or array of test losses (y-axis values for test curve)
+    - loss_function: String specifying the loss function used (for the ylabel)
+    - save_path: File path which the plot will be saved as
+    """
+    plt.figure()
+    # Create the plot
+    plt.plot(log_steps, train_losses, label="train")
+    plt.plot(log_steps, test_losses, label="val")
+    
+    # Add plot elements
+    plt.legend()
+    title = "Fashion MNIST Image Reconstruction"
+    plt.title(title)
+    plt.xlabel("Optimization Steps")
+    plt.ylabel(f"{loss_function} Loss")
+    
+    # Use log scale for both axes
+    plt.xscale("log", base=10)
+    plt.yscale("log", base=10)
+    plt.grid()
+    
+    # Save the plot
+    if save_path:
+        plt.savefig(save_path, dpi=150)
+    plt.close()
+
+# Function to extract latent vectors and labels
+def get_latent_vectors(ae, data_loader, device):
+    latent_vectors = []
+    labels = []
+    ae.eval()  # Set the model to evaluation mode
+    with torch.no_grad():
+        for x, y in data_loader:
+            x = x.to(device)
+            _, z = ae.forward_with_latent(x)
+            latent_vectors.append(z.cpu().numpy())
+            labels.append(y.numpy())
+    latent_vectors = np.concatenate(latent_vectors, axis=0)
+    labels = np.concatenate(labels, axis=0)
+    return latent_vectors, labels
+
+# Plotting function for t-SNE
+def plot_tsne(latent_2d, labels, title, save_path=None):
+    plt.figure(figsize=(8, 8))
+    scatter = plt.scatter(latent_2d[:, 0], latent_2d[:, 1], c=labels, cmap='tab10', s=10)
+    plt.colorbar(scatter, label="Class")
+    plt.title(title)
+    plt.xlabel("t-SNE Component 1")
+    plt.ylabel("t-SNE Component 2")
+    # Save figure if save_path is provided
+    if save_path:
+        plt.savefig(save_path, dpi=150)
+    plt.close()
+
+# Plotting function for t-SNE with dataset and class labels
+def plot_combined_tsne(latent_2d, split_labels, class_labels, title, save_path=None):
+    plt.figure(figsize=(8, 8))
+    # Define markers and color map for visualization
+    markers = ['o', 'x']  # 'o' for train, 'x' for test
+
+    # Plot train and test points with different markers and colors for class labels
+    for i, dataset_label in enumerate(np.unique(split_labels)):  # 0 for train, 1 for test
+        indices = split_labels == dataset_label
+        plt.scatter(latent_2d[indices, 0], latent_2d[indices, 1],
+                    c=class_labels[indices], cmap='tab10', label=f"{'Train' if dataset_label == 0 else 'Test'}",
+                    marker=markers[dataset_label], s=10, alpha=0.7)
+
+    plt.colorbar(label="Class Label")
+    plt.title(title)
+    plt.xlabel("t-SNE Component 1")
+    plt.ylabel("t-SNE Component 2")
+    plt.legend(title="Dataset", loc="best")
+
+    # Save figure if save_path is provided
+    if save_path:
+        plt.savefig(save_path, dpi=150)
+    plt.close()
+
+# Function to plot original and reconstructed images
+def plot_reconstructions(x, x_hat, num_images=6, save_path=None):
+    """Plot original images (x) on top and reconstructed images (x_hat) on bottom."""
+    # Convert tensors to numpy arrays for plotting
+    x = x[:num_images].detach().cpu().numpy()  # Get the first `num_images` images
+    x_hat = x_hat[:num_images].detach().cpu().numpy()
+    
+    fig, axes = plt.subplots(2, num_images, figsize=(num_images * 2, 4))
+    
+    for i in range(num_images):
+        # Original images on the top row
+        axes[0, i].imshow(x[i].squeeze(), cmap='gray')
+        axes[0, i].axis('off')
+        if i == num_images // 2:
+            axes[0, i].set_title("Original")
+
+        # Reconstructed images on the bottom row
+        axes[1, i].imshow(x_hat[i].squeeze(), cmap='gray')
+        axes[1, i].axis('off')
+        if i == num_images // 2:
+            axes[1, i].set_title("Reconstructed")
+    
+    plt.tight_layout()
+
+    # Save the plot if save_path is specified
+    if save_path:
+        plt.savefig(save_path, dpi=150)
+    plt.close()
 
 def main(args):
     log_freq = math.ceil(args.optimization_steps / 150)
@@ -90,9 +204,9 @@ def main(args):
     activation_fn = activation_dict[args.activation]
 
     # create model
+    """
     ae = Autoencoder(base_channel_size=32,
-                     #latent_dim=64,
-                     latent_dim=16,
+                     latent_dim=64,
                      encoder_class=Encoder,
                      encoder_act_fn=activation_fn,
                      decoder_class=Decoder,
@@ -101,6 +215,8 @@ def main(args):
                      num_input_channels=1,
                      width=28,
                      height=28)
+    """
+    ae = DenoiseAutoencoder(activation_fn, nn.Sigmoid)
     ae.to(device)
     with torch.no_grad():
         for p in ae.parameters():
@@ -168,19 +284,8 @@ def main(args):
             pbar.update(1)
 
             if do_log:
-                title = (f"Fashion MNIST Image Reconstruction")
-
-                plt.plot(log_steps, train_losses, label="train")
-                plt.plot(log_steps, test_losses, label="val")
-                plt.legend()
-                plt.title(title)
-                plt.xlabel("Optimization Steps")
-                plt.ylabel(f"{args.loss_function} Loss")
-                plt.xscale("log", base=10)
-                plt.yscale("log", base=10)
-                plt.grid()
-                plt.savefig(f"results/fashion_mnist_loss_{args.label}.png", dpi=150)
-                plt.close()
+                plot_losses(log_steps, train_losses, test_losses, args.loss_function, save_path=f"results/fashion_mnist_{args.label}_loss.png")
+                plot_reconstructions(x, x_hat, 6, save_path=f"results/fashion_mnist_{args.label}_images.png")
 
                 torch.save({
                     'its': log_steps,
@@ -199,21 +304,6 @@ def main(args):
         transform=T.ToTensor(), download=True) 
     train_loader = DataLoader(train, batch_size=args.batch_size, shuffle=False)
     test_loader = DataLoader(test, batch_size=args.batch_size, shuffle=False)
-
-    # Function to extract latent vectors and labels
-    def get_latent_vectors(ae, data_loader, device):
-        latent_vectors = []
-        labels = []
-        ae.eval()  # Set the model to evaluation mode
-        with torch.no_grad():
-            for x, y in data_loader:
-                x = x.to(device)
-                _, z = ae.forward_with_latent(x)
-                latent_vectors.append(z.cpu().numpy())
-                labels.append(y.numpy())
-        latent_vectors = np.concatenate(latent_vectors, axis=0)
-        labels = np.concatenate(labels, axis=0)
-        return latent_vectors, labels
     
     # Extract latent vectors and labels for train and test sets
     train_latent, train_labels = get_latent_vectors(ae, train_loader, device)
@@ -231,43 +321,6 @@ def main(args):
     #train_latent_2d = tsne.fit_transform(train_latent)
     #test_latent_2d = tsne.fit_transform(test_latent)
     combined_latent_2d = tsne.fit_transform(combined_latent)
-
-    # Plotting function for t-SNE
-    def plot_tsne(latent_2d, labels, title, save_path=None):
-        plt.figure(figsize=(8, 8))
-        scatter = plt.scatter(latent_2d[:, 0], latent_2d[:, 1], c=labels, cmap='tab10', s=10)
-        plt.colorbar(scatter, label="Class")
-        plt.title(title)
-        plt.xlabel("t-SNE Component 1")
-        plt.ylabel("t-SNE Component 2")
-        # Save figure if save_path is provided
-        if save_path:
-            plt.savefig(save_path, dpi=150)
-        plt.show()
-
-    # Plotting function for t-SNE with dataset and class labels
-    def plot_combined_tsne(latent_2d, split_labels, class_labels, title, save_path=None):
-        plt.figure(figsize=(8, 8))
-        # Define markers and color map for visualization
-        markers = ['o', 'x']  # 'o' for train, 'x' for test
-
-        # Plot train and test points with different markers and colors for class labels
-        for i, dataset_label in enumerate(np.unique(split_labels)):  # 0 for train, 1 for test
-            indices = split_labels == dataset_label
-            plt.scatter(latent_2d[indices, 0], latent_2d[indices, 1],
-                        c=class_labels[indices], cmap='tab10', label=f"{'Train' if dataset_label == 0 else 'Test'}",
-                        marker=markers[dataset_label], s=10, alpha=0.7)
-
-        plt.colorbar(label="Class Label")
-        plt.title(title)
-        plt.xlabel("t-SNE Component 1")
-        plt.ylabel("t-SNE Component 2")
-        plt.legend(title="Dataset", loc="best")
-
-        # Save figure if save_path is provided
-        if save_path:
-            plt.savefig(save_path, dpi=150)
-        plt.show()
 
     # Plot t-SNE
     train_title = "t-SNE of Train Latent Vectors with Class Labels"
