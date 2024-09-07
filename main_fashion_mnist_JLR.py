@@ -28,9 +28,10 @@ def cycle(iterable):
         for x in iterable:
             yield x
 
-def compute_loss(network, dataset, loss_function, device, N=2000, batch_size=50):
+def compute_loss(network, dataset, loss_function, device, N=2000, batch_size=50, noisy_input=False, noise_factor=0.2):
     """Computes mean loss of `network` on `dataset`.
     """
+    network.eval()
     with torch.no_grad():
         N = min(len(dataset), N)
         batch_size = min(batch_size, N)
@@ -40,7 +41,12 @@ def compute_loss(network, dataset, loss_function, device, N=2000, batch_size=50)
         points = 0
         for x, labels in islice(dataset_loader, N // batch_size):
             x = x.to(device)
-            x_hat = network(x) # reconstruction
+            if noisy_input: # https://www.tensorflow.org/tutorials/generative/autoencoder?hl=es-419#second_example_image_denoising
+                x_noisy = x + noise_factor * torch.randn(x.shape, device=device)
+                x_noisy = torch.clamp(x_noisy, 0, 1)
+                x_hat = network(x_noisy) # denoising
+            else: # not noisy input
+                x_hat = network(x) # reconstruction
             if loss_function == 'MSE':
                 total += loss_fn(x_hat, x).item()
             else:
@@ -152,26 +158,48 @@ def plot_combined_tsne(latent_2d, split_labels, class_labels, title, save_path=N
     plt.close()
 
 # Function to plot original and reconstructed images
-def plot_reconstructions(x, x_hat, num_images=6, save_path=None):
-    """Plot original images (x) on top and reconstructed images (x_hat) on bottom."""
+def plot_reconstructions(x, x_hat, num_images=7, save_path=None, x_noisy=None):
+    """
+    Plot original images (x), reconstructed images (x_hat), and optionally noisy images (x_noisy).
+    
+    Parameters:
+    - x: Original images (tensor)
+    - x_hat: Reconstructed images (tensor)
+    - num_images: Number of images to display (default is 6)
+    - save_path: Path to save the plot (default is None, meaning the plot is not saved)
+    - x_noisy: Optional noisy images to be plotted in the first row
+    """
     # Convert tensors to numpy arrays for plotting
     x = x[:num_images].detach().cpu().numpy()  # Get the first `num_images` images
     x_hat = x_hat[:num_images].detach().cpu().numpy()
     
-    fig, axes = plt.subplots(2, num_images, figsize=(num_images * 2, 4))
+    rows = 3 if x_noisy is not None else 2  # If noisy images are provided, use 3 rows
+    fig, axes = plt.subplots(rows, num_images, figsize=(num_images * 2, rows * 2))
     
-    for i in range(num_images):
-        # Original images on the top row
-        axes[0, i].imshow(x[i].squeeze(), cmap='gray')
-        axes[0, i].axis('off')
-        if i == num_images // 2:
-            axes[0, i].set_title("Original")
+    if x_noisy is not None:
+        x_noisy = x_noisy[:num_images].detach().cpu().numpy()
+        for i in range(num_images):
+            # Noisy images on the first row
+            axes[0, i].imshow(x_noisy[i].squeeze(), cmap='gray')
+            axes[0, i].axis('off')
+            if i == num_images // 2:
+                axes[0, i].set_title("Noisy")
+    
+    orig_axis = 1 if x_noisy is not None else 0
+    rec_axis = orig_axis + 1
 
-        # Reconstructed images on the bottom row
-        axes[1, i].imshow(x_hat[i].squeeze(), cmap='gray')
-        axes[1, i].axis('off')
+    for i in range(num_images):
+        # Original images on the second row (or first if no noisy images)
+        axes[orig_axis, i].imshow(x[i].squeeze(), cmap='gray')
+        axes[orig_axis, i].axis('off')
         if i == num_images // 2:
-            axes[1, i].set_title("Reconstructed")
+            axes[orig_axis, i].set_title("Original")
+
+        # Reconstructed images on the last row
+        axes[rec_axis, i].imshow(x_hat[i].squeeze(), cmap='gray')
+        axes[rec_axis, i].axis('off')
+        if i == num_images // 2:
+            axes[rec_axis, i].set_title("Reconstructed")
     
     plt.tight_layout()
 
@@ -232,6 +260,10 @@ def main(args):
     assert args.loss_function in loss_function_dict
     loss_fn = loss_function_dict[args.loss_function]()
 
+    # noisy input
+    noisy_input = args.noise_factor != 0
+    if noisy_input:
+        print("Noise factor:", args.noise_factor)
 
     train_losses, test_losses = [], []
     norms, last_layer_norms, log_steps = [], [], []
@@ -243,8 +275,14 @@ def main(args):
             x = x.to(device)
             do_log = (steps < 30) or (steps < 150 and steps % 10 == 0) or steps % log_freq == 0
             if do_log:
-                train_losses.append(compute_loss(ae, train, args.loss_function, device, N=len(train)))
-                test_losses.append(compute_loss(ae, test, args.loss_function, device, N=len(test)))
+                train_losses.append(compute_loss(ae, train, args.loss_function, device, 
+                                                 N=len(train), 
+                                                 noisy_input=noisy_input, 
+                                                 noise_factor=args.noise_factor))
+                test_losses.append(compute_loss(ae, test, args.loss_function, device, 
+                                                N=len(test), 
+                                                noisy_input=noisy_input, 
+                                                noise_factor=args.noise_factor))
                 log_steps.append(steps)
 
                 pbar.set_description(
@@ -254,7 +292,16 @@ def main(args):
                     )
                 )
 
-            x_hat = ae(x)
+            ae.train()
+
+            if noisy_input: # https://www.tensorflow.org/tutorials/generative/autoencoder?hl=es-419#second_example_image_denoising
+                x_noisy = x + args.noise_factor * torch.randn(x.shape, device=device)
+                x_noisy = torch.clamp(x_noisy, 0, 1)
+                x_hat = ae(x_noisy) # denoising
+            else: # not noisy input
+                x_hat = ae(x) # reconstruction
+                x_noisy=None
+
             if args.loss_function == 'MSE':
                 loss = loss_fn(x_hat, x)
             else:
@@ -285,7 +332,7 @@ def main(args):
 
             if do_log:
                 plot_losses(log_steps, train_losses, test_losses, args.loss_function, save_path=f"results/fashion_mnist_{args.label}_loss.png")
-                plot_reconstructions(x, x_hat, 6, save_path=f"results/fashion_mnist_{args.label}_images.png")
+                plot_reconstructions(x, x_hat, 7, save_path=f"results/fashion_mnist_{args.label}_images.png", x_noisy=x_noisy)
 
                 torch.save({
                     'its': log_steps,
@@ -351,6 +398,9 @@ if __name__ == '__main__':
     parser.add_argument("--width", type=int, default=200)
     parser.add_argument("--activation", type=str, default="ReLU")
 
+    # Task
+    parser.add_argument("--noise_factor", type=float, default=0.0)
+
     # Grokfast
     parser.add_argument("--filter", type=str, choices=["none", "ma", "ema", "fir"], default="none")
     parser.add_argument("--alpha", type=float, default=0.99)
@@ -378,7 +428,11 @@ if __name__ == '__main__':
     if args.lr != 1e-3:
         optim_suffix = optim_suffix + f'_lrx{int(args.lr / 1e-3)}'
 
-    args.label = args.label + filter_str + filter_suffix + optim_suffix
+    noise_suffix = ''
+    if args.noise_factor != 0:
+        noise_suffix += f'_noisy{args.noise_factor:.3f}'.replace('.', '')
+
+    args.label = args.label + filter_str + filter_suffix + optim_suffix + noise_suffix
     print(f'Experiment results saved under name: {args.label}')
 
     main(args)
